@@ -2,6 +2,7 @@
   "expo": {
     "name": "water-leak-monitor",
     "slug": "water-leak-monitor",
+    "scheme": "water-leak-monitor",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -24,7 +25,8 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
     }
   }
 }

@@ -3,16 +3,31 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
+    "test": "node --test src/lib/parseAuthCallback.test.ts src/lib/formatError.test.ts",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
   "dependencies": {
-    "expo": "~55.0.8",
-    "expo-status-bar": "~55.0.4",
-    "react": "19.2.0",
-    "react-native": "0.83.2"
+    "@expo/vector-icons": "^15.0.3",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/slider": "5.0.1",
+    "@supabase/supabase-js": "^2.100.0",
+    "babel-preset-expo": "~54.0.10",
+    "expo": "~54.0.0",
+    "expo-clipboard": "~8.0.8",
+    "expo-constants": "~18.0.13",
+    "expo-linking": "~8.0.0",
+    "expo-status-bar": "~3.0.9",
+    "nativewind": "^4.2.3",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-reanimated": "~4.1.1",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-url-polyfill": "^3.0.0",
+    "react-native-worklets": "0.5.1",
+    "tailwindcss": "^3.4.19"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
