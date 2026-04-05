@@ -1,19 +1,10 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# Secrets — never commit
-.env
-**/.env
-.env*.local
-**/.env.*.local
-
-# Dependencies
+# dependencies
 node_modules/
-water-leak-monitor/node_modules/
-water-leak-monitor/firmware/bridge/node_modules/
 
 # Expo
 .expo/
-water-leak-monitor/.expo/
 dist/
 web-build/
 expo-env.d.ts
@@ -29,17 +20,19 @@ expo-env.d.ts
 
 # Metro
 .metro-health-check*
-**/.metro-health-check*
 
 # debug
 npm-debug.*
 yarn-debug.*
 yarn-error.*
 
-# macOS / Windows
+# macOS
 .DS_Store
-Thumbs.db
 *.pem
+
+# local env files
+.env
+.env*.local
 
 # typescript
 *.tsbuildinfo
@@ -47,12 +40,3 @@ Thumbs.db
 # generated native folders
 /ios
 /android
-
-# Supabase CLI local state (optional)
-.supabase/
-supabase/.temp/
-
-# JVM / crash logs
-hs_err_pid*.log
-replay_pid*.log
-*.log
