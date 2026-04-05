@@ -1,0 +1,29 @@
+# Secrets — never commit
+.env
+**/.env
+**/.env.*.local
+
+# Dependencies
+node_modules/
+water-leak-monitor/node_modules/
+water-leak-monitor/firmware/bridge/node_modules/
+
+# Expo / Metro
+water-leak-monitor/.expo/
+**/.metro-health-check*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Supabase CLI local state (optional)
+.supabase/
+supabase/.temp/
+
+# Expo at repo root (if present)
+.expo/
+
+# JVM / crash logs
+hs_err_pid*.log
+replay_pid*.log
+*.log

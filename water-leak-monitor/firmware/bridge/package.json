@@ -1,0 +1,12 @@
+{
+  "name": "aquaguard-serial-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node serial-bridge.mjs",
+    "mock": "node mock-control-bridge.mjs"
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  }
+}
