@@ -158,7 +158,7 @@ export function LabScreen() {
           zoneName={zone.name}
           location={roomLocation}
           zoneValveOpen={zone.valve_open ?? true}
-          onDone={load}
+          onDone={() => { load(); }}
         />
       ) : null}
 

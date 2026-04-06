@@ -5,7 +5,7 @@ import {
   formatEdgeFunctionInvokeError,
   formatError,
   formatFunctionsInvokeCatch,
-} from "./formatError.ts";
+} from "./formatError";
 
 describe("formatError", () => {
   it("returns Error.message for Error instances", () => {

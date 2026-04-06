@@ -1,5 +1,56 @@
-/// <reference path="./deno-env.d.ts" />
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const PUTER_CHAT_URL =
+  "https://api.puter.com/puterai/openai/v1/chat/completions";
+const EDGE_LLM_HINT =
+  "Set PUTER_AUTH_TOKEN (Puter dashboard). Optional PUTER_MODEL (default gpt-5-nano).";
+
+function llmBearer(): string | null {
+  return Deno.env.get("PUTER_AUTH_TOKEN")?.trim() ?? null;
+}
+
+function chatModel(): string {
+  return Deno.env.get("PUTER_MODEL")?.trim() || "gpt-5-nano";
+}
+
+const PUTER_TEMPERATURE = 1;
+
+async function llmChat(
+  system: string,
+  user: string,
+  maxTokens: number,
+  _temperature: number,
+): Promise<{ text: string; model: string }> {
+  const key = llmBearer();
+  if (!key) throw new Error("NO_LLM");
+  const m = chatModel();
+  const res = await fetch(PUTER_CHAT_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: m,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      max_tokens: maxTokens,
+      temperature: PUTER_TEMPERATURE,
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`llm:${res.status}:${t.slice(0, 400)}`);
+  }
+  const completion = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const text = completion.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("empty_completion");
+  return { text, model: m };
+}
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -28,36 +79,6 @@ function zoneNameFromRow(r: LeakRow): string {
   const z = r.zones;
   if (!z) return "Zone";
   return Array.isArray(z) ? (z[0]?.name ?? "Zone") : z.name;
-}
-
-async function openaiReply(system: string, userContent: string): Promise<Response> {
-  const openaiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!openaiKey) {
-    return new Response(
-      JSON.stringify({
-        error: "AI not configured",
-        hint: "Set OPENAI_API_KEY in Edge Function secrets.",
-      }),
-      { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
-  }
-  const model = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
-  return await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openaiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userContent },
-      ],
-      max_tokens: 650,
-      temperature: 0.4,
-    }),
-  });
 }
 
 Deno.serve(async (req) => {
@@ -186,30 +207,35 @@ Deno.serve(async (req) => {
     .filter(Boolean)
     .join("\n");
 
-  const openaiRes = await openaiReply(SYSTEM, stats);
-  if (openaiRes.status === 503) {
-    return openaiRes;
-  }
-
-  if (!openaiRes.ok) {
-    const t = await openaiRes.text();
-    console.error("ai-history-summary: OpenAI", openaiRes.status, t.slice(0, 400));
+  if (!llmBearer()) {
     return new Response(
       JSON.stringify({
-        error: "AI request failed",
-        detail: t.length > 280 ? `${t.slice(0, 277)}…` : t,
+        error: "AI not configured",
+        hint: EDGE_LLM_HINT,
       }),
-      { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 
-  const completion = (await openaiRes.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const model = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
-  const reply = completion.choices?.[0]?.message?.content?.trim();
-
-  if (!reply) {
+  let reply: string;
+  let model: string;
+  try {
+    const out = await llmChat(SYSTEM, stats, 650, 0.4);
+    reply = out.text;
+    model = out.model;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.startsWith("llm:")) {
+      const t = msg.replace(/^llm:\d+:/, "");
+      console.error("ai-history-summary: LLM", msg.slice(0, 120));
+      return new Response(
+        JSON.stringify({
+          error: "AI request failed",
+          detail: t.length > 280 ? `${t.slice(0, 277)}…` : t,
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     return new Response(JSON.stringify({ error: "Empty AI response" }), {
       status: 502,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

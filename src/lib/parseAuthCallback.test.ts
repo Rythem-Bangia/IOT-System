@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseAuthCallbackUrl } from "./parseAuthCallback.ts";
+import { parseAuthCallbackUrl } from "./parseAuthCallback";
 
 describe("parseAuthCallbackUrl", () => {
   it("reads implicit flow tokens from hash", () => {

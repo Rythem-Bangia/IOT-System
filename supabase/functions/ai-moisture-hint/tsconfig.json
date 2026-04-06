@@ -14,5 +14,5 @@
       ]
     }
   },
-  "include": ["index.ts", "deno-env.d.ts"]
+  "include": ["index.ts"]
 }

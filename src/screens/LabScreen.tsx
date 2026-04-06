@@ -18,6 +18,7 @@ import { ensureDefaultSetup, fetchZones, type ZoneRow } from "../lib/iot";
 import { brand } from "../theme/brand";
 
 export function LabScreen() {
+  const scrollBottom = useScrollBottomInset(28);
   const { user } = useAuth();
   const [zone, setZone] = useState<ZoneRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,7 +137,7 @@ export function LabScreen() {
           zoneName={zone.name}
           location={roomLocation}
           zoneValveOpen={zone.valve_open ?? true}
-          onDone={load}
+          onDone={() => { load(); }}
         />
       ) : null}
 

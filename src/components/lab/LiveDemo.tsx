@@ -6,10 +6,12 @@ import {
   Animated,
   Easing,
   Pressable,
+  ScrollView,
   Text,
   View,
 } from "react-native";
 import { formatError } from "../../lib/formatError";
+import { invokeAiHub } from "../../lib/aiHub";
 import {
   resetValve,
   sendLeakEmail,
@@ -26,7 +28,21 @@ type Phase =
   | "closing"
   | "alarm"
   | "email"
+  | "ai"
   | "done";
+
+export type SimulationResult = {
+  leakDetected: boolean;
+  leakEventId?: string;
+  valveClosed: boolean;
+  responseMs?: number;
+  moistureSent: number;
+  threshold: number;
+  emailSent?: boolean;
+  emailError?: string;
+  zoneName: string;
+  source: "virtual" | "physical";
+};
 
 type Props = {
   zoneId: string;
@@ -36,7 +52,7 @@ type Props = {
   location: string;
   /** When false, demo calls reset (reopens valve; cloud last_moisture → 0) before submitting. */
   zoneValveOpen?: boolean;
-  onDone: () => void;
+  onDone: (result?: SimulationResult) => void;
 };
 
 /* ─── Animated water particles ─── */
@@ -248,6 +264,7 @@ export function LiveDemo({
   const [leakVisible, setLeakVisible] = useState(false);
   const [waterFlowing, setWaterFlowing] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [aiBrief, setAiBrief] = useState<string | null>(null);
   const logId = useRef(0);
   const cancelled = useRef(false);
   const pulseAnim = useRef(new Animated.Value(0)).current;
@@ -264,6 +281,7 @@ export function LiveDemo({
     "closing",
     "alarm",
     "email",
+    "ai",
   ];
 
   const stepStatus = useCallback(
@@ -308,6 +326,7 @@ export function LiveDemo({
     cancelled.current = false;
     setRunning(true);
     setLogs([]);
+    setAiBrief(null);
     setValveOpen(true);
     setSensorReading(null);
     setLeakVisible(false);
@@ -393,11 +412,15 @@ export function LiveDemo({
       if (cancelled.current) return;
 
       setPhase("email");
+      let emailOk = false;
+      let emailErrMsg: string | undefined;
       if (res?.leak_event_id) {
         addLog("Sending email alert…", "info");
         try {
           const mail = await sendLeakEmail(res.leak_event_id);
           if (cancelled.current) return;
+          emailOk = Boolean(mail?.emailed);
+          if (!emailOk) emailErrMsg = mail?.message ?? "Email skipped";
           addLog(
             mail?.emailed
               ? "Email sent to your inbox"
@@ -406,7 +429,8 @@ export function LiveDemo({
           );
         } catch (e) {
           if (cancelled.current) return;
-          addLog(`Email error: ${formatError(e)}`, "error");
+          emailErrMsg = formatError(e);
+          addLog(`Email error: ${emailErrMsg}`, "error");
         }
       } else {
         addLog("No new leak event — email skipped", "info");
@@ -414,10 +438,50 @@ export function LiveDemo({
       await wait(800);
       if (cancelled.current) return;
 
+      setPhase("ai");
+      addLog("AI analyzing incident…", "info");
+      try {
+        const aiPayload: Record<string, unknown> = {
+          zone_id: zoneId,
+          simulation_result: {
+            leak_detected: Boolean(res?.leak_detected),
+            valve_closed: Boolean(res?.valve_closed),
+            response_ms: res?.response_ms,
+            moisture_sent: leakMoisture,
+            threshold,
+            email_sent: emailOk,
+            email_error: emailErrMsg,
+            source: "virtual",
+          },
+        };
+        const { reply } = await invokeAiHub("simulate_analysis", aiPayload);
+        if (!cancelled.current) {
+          setAiBrief(reply);
+          addLog("AI brief ready", "success");
+        }
+      } catch (e) {
+        if (!cancelled.current) {
+          addLog(`AI: ${formatError(e)}`, "warn");
+        }
+      }
+      await wait(600);
+      if (cancelled.current) return;
+
       setPhase("done");
       setLeakVisible(false);
       addLog("Simulation complete", "success");
-      onDone();
+      onDone({
+        leakDetected: Boolean(res?.leak_detected),
+        leakEventId: res?.leak_event_id,
+        valveClosed: Boolean(res?.valve_closed),
+        responseMs: res?.response_ms,
+        moistureSent: leakMoisture,
+        threshold,
+        emailSent: emailOk,
+        emailError: emailErrMsg,
+        zoneName: locLabel,
+        source: "virtual",
+      });
     } catch (e) {
       Alert.alert("Demo error", formatError(e));
       addLog(`Error: ${formatError(e)}`, "error");
@@ -447,6 +511,7 @@ export function LiveDemo({
       setSensorReading(null);
       setLeakVisible(false);
       setWaterFlowing(false);
+      setAiBrief(null);
       setLogs([]);
       addLog("Valve reopened, system reset", "success");
     } catch (e) {
@@ -704,6 +769,7 @@ export function LiveDemo({
                 { phase: "closing" as Phase, icon: "lock-closed-outline" as const, label: "Valve", color: "#fda4af" },
                 { phase: "alarm" as Phase, icon: "volume-high-outline" as const, label: "Alarm", color: "#fbbf24" },
                 { phase: "email" as Phase, icon: "mail-outline" as const, label: "Email", color: "#a5b4fc" },
+                { phase: "ai" as Phase, icon: "sparkles-outline" as const, label: "AI", color: "#c084fc" },
               ] as const
             ).map((s, i) => (
               <React.Fragment key={s.phase}>
@@ -764,9 +830,11 @@ export function LiveDemo({
                         ? "Valve closing — shutting off water!"
                         : phase === "alarm"
                           ? "On-site alarm activated"
-                          : phase === "email"
+                            : phase === "email"
                             ? "Sending email notification…"
-                            : "Simulation complete — system protected"}
+                            : phase === "ai"
+                              ? "AI analyzing the incident…"
+                              : "Simulation complete — system protected"}
           </Text>
         </View>
       </View>
@@ -804,6 +872,23 @@ export function LiveDemo({
                 </Text>
               </View>
             ))}
+          </View>
+        </View>
+      ) : null}
+
+      {/* AI incident brief */}
+      {aiBrief ? (
+        <View className="px-4 pb-3">
+          <View className="bg-violet-950/50 rounded-2xl border border-violet-800/40 p-4">
+            <View className="flex-row items-center gap-2 mb-2">
+              <Ionicons name="sparkles" size={16} color="#c084fc" />
+              <Text className="text-violet-200 text-xs font-black uppercase tracking-wider">
+                AI incident brief
+              </Text>
+            </View>
+            <Text className="text-violet-100/90 text-xs leading-[18px]">
+              {aiBrief}
+            </Text>
           </View>
         </View>
       ) : null}
@@ -866,8 +951,11 @@ export function LiveDemo({
 
 function ScrollViewHorizontal({ children }: { children: React.ReactNode }) {
   return (
-    <View style={{ overflow: "hidden" }}>
-      <View className="flex-row">{children}</View>
-    </View>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+    >
+      {children}
+    </ScrollView>
   );
 }

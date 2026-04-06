@@ -5,50 +5,75 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   View,
 } from "react-native";
 import Slider from "@react-native-community/slider";
+import { AiTextSheet } from "../components/AiTextSheet";
+import { ZoneTipsSheet } from "../components/ZoneTipsSheet";
 import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { SectionCard } from "../components/ui/SectionCard";
 import { useScrollBottomInset } from "../hooks/useScrollBottomInset";
 import { useAuth } from "../context/AuthContext";
+import { invokeAiHub } from "../lib/aiHub";
 import { formatError } from "../lib/formatError";
 import {
   clearZoneLastMoisture,
   ensureDefaultSetup,
   fetchZones,
+  getSelectedRoom,
+  getRoomStats,
   resetValve,
+  setSelectedRoom as setStoredSelectedRoom,
   submitReading,
+  syncZoneNameWithSelectedRoom,
   tryInvokeLeakEmailAfterSubmit,
   updateThreshold,
+  type RoomStats,
   type ZoneRow,
 } from "../lib/iot";
+import { ROOM_OPTIONS, roomOptionById, roomOptionByLabel } from "../data/rooms";
 import { brand } from "../theme/brand";
 
-function locationKey(uid: string) {
-  return `lab_room_location_${uid}`;
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
 }
+
 function thresholdsKey(uid: string) {
   return `room_thresholds_${uid}`;
 }
 
-const ROOMS: {
-  id: string;
-  label: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-}[] = [
-  { id: "kitchen", label: "Kitchen", icon: "restaurant-outline" },
-  { id: "bathroom", label: "Bathroom", icon: "water-outline" },
-  { id: "basement", label: "Basement", icon: "arrow-down-outline" },
-  { id: "laundry", label: "Laundry", icon: "shirt-outline" },
-  { id: "garage", label: "Garage", icon: "car-outline" },
-  { id: "bedroom", label: "Bedroom", icon: "bed-outline" },
-  { id: "utility", label: "Utility room", icon: "build-outline" },
-];
-
 type RoomThresholds = Record<string, number>;
+
+function parseRoomThresholds(raw: string | null): RoomThresholds {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: RoomThresholds = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "number" && Number.isFinite(v)) {
+        out[k] = Math.round(Math.max(0, Math.min(100, v)));
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 export function DashboardScreen() {
   const scrollBottom = useScrollBottomInset(28);
@@ -60,19 +85,25 @@ export function DashboardScreen() {
   const [saving, setSaving] = useState(false);
   const [clearingMoisture, setClearingMoisture] = useState(false);
   const [roomThresholds, setRoomThresholds] = useState<RoomThresholds>({});
+  const [roomStats, setRoomStats] = useState<RoomStats | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [tipsOpen, setTipsOpen] = useState(false);
+  type DashAiKind = "sensor_health" | "anomaly" | "threshold" | "false_positive";
+  const [dashAi, setDashAi] = useState<DashAiKind | null>(null);
 
   // Load saved room + thresholds from AsyncStorage (scoped per user)
   useEffect(() => {
     if (!user?.id) return;
     Promise.all([
-      AsyncStorage.getItem(locationKey(user.id)),
+      getSelectedRoom(user.id),
       AsyncStorage.getItem(thresholdsKey(user.id)),
     ]).then(([loc, thr]) => {
-      const saved: RoomThresholds = thr ? JSON.parse(thr) : {};
+      const saved: RoomThresholds = parseRoomThresholds(thr);
       setRoomThresholds(saved);
       if (loc) {
-        const room = ROOMS.find((r) => r.label === loc);
-        const roomId = room?.id ?? null;
+        const byLabel = roomOptionByLabel(loc);
+        const roomId = byLabel?.id ?? null;
         setSelectedRoom(roomId);
         if (roomId && saved[roomId] !== undefined) {
           setThresholdDraft(saved[roomId]);
@@ -83,31 +114,90 @@ export function DashboardScreen() {
 
   const refresh = useCallback(async () => {
     if (!user?.id) return;
-    await ensureDefaultSetup(user.id);
-    const z = await fetchZones();
+    await withTimeout(ensureDefaultSetup(user.id), 12000, "Setup");
+    const z = await withTimeout(fetchZones(), 12000, "Fetch zones");
     setZone(z[0] ?? null);
   }, [user?.id]);
 
   useEffect(() => {
     setLoading(true);
     refresh()
+      .then(() => setLastSyncedAt(new Date()))
       .catch((e) => Alert.alert("Load error", formatError(e)))
       .finally(() => setLoading(false));
   }, [refresh]);
 
+  const onPullRefresh = useCallback(async () => {
+    if (!user?.id) return;
+    setRefreshing(true);
+    try {
+      await refresh();
+      const zones = await fetchZones();
+      const id = zones[0]?.id;
+      if (id) {
+        const s = await getRoomStats(id, 7).catch(() => null);
+        if (s) setRoomStats(s);
+      }
+      setLastSyncedAt(new Date());
+    } catch (e) {
+      Alert.alert("Refresh failed", formatError(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user?.id, refresh]);
+
+  useEffect(() => {
+    if (!zone?.id) {
+      setRoomStats(null);
+      return;
+    }
+    getRoomStats(zone.id, 7)
+      .then(setRoomStats)
+      .catch(() => setRoomStats(null));
+  }, [zone?.id]);
+
+  // Keep Supabase zone.name aligned with the selected room (emails + history use zone.name).
+  useEffect(() => {
+    if (!zone || !selectedRoom || !user?.id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await syncZoneNameWithSelectedRoom(user.id, zone);
+        if (!cancelled) await refresh();
+      } catch {
+        /* pickRoom / Save surface errors; avoid alert loops on load */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [zone, selectedRoom, refresh, user?.id]);
+
   const pickRoom = useCallback(
     (roomId: string) => {
       setSelectedRoom(roomId);
-      const room = ROOMS.find((r) => r.id === roomId);
-      if (user?.id) AsyncStorage.setItem(locationKey(user.id), room?.label ?? roomId);
+      const room = roomOptionById(roomId);
+      const label = room?.label ?? roomId;
+      if (user?.id) void setStoredSelectedRoom(user.id, label);
 
       if (roomThresholds[roomId] !== undefined) {
         setThresholdDraft(roomThresholds[roomId]);
       } else {
         setThresholdDraft(zone?.moisture_threshold ?? 65);
       }
+
+      if (zone) {
+        void (async () => {
+          try {
+            if (user?.id) await syncZoneNameWithSelectedRoom(user.id, zone);
+            await refresh();
+          } catch (e) {
+            Alert.alert("Could not update zone name", formatError(e));
+          }
+        })();
+      }
     },
-    [roomThresholds, zone?.moisture_threshold, user?.id],
+    [roomThresholds, zone, user?.id, refresh],
   );
 
   const handleClearLastMoisturePress = useCallback(async () => {
@@ -138,6 +228,12 @@ export function DashboardScreen() {
       setRoomThresholds(updated);
       if (user?.id) await AsyncStorage.setItem(thresholdsKey(user.id), JSON.stringify(updated));
       await updateThreshold(zone.id, thr);
+      const roomLabel =
+        roomOptionById(selectedRoom)?.label ?? selectedRoom;
+      if (user?.id) {
+        await setStoredSelectedRoom(user.id, roomLabel);
+        await syncZoneNameWithSelectedRoom(user.id, zone);
+      }
       await refresh();
       const zonesAfter = await fetchZones();
       const z0 = zonesAfter[0];
@@ -157,8 +253,6 @@ export function DashboardScreen() {
         }
         await refresh();
       }
-      const roomLabel =
-        ROOMS.find((r) => r.id === selectedRoom)?.label ?? selectedRoom;
       let body =
         tripped && lastM != null
           ? `${roomLabel}: threshold ${thr}%. Your last reading (${Math.round(lastM)}%) was already at or above it — valve closed and a leak event was logged.`
@@ -201,8 +295,8 @@ export function DashboardScreen() {
   const configuredRooms = Object.entries(roomThresholds)
     .map(([id, thr]) => ({
       id,
-      label: ROOMS.find((r) => r.id === id)?.label ?? id,
-      icon: ROOMS.find((r) => r.id === id)?.icon ?? ("location-outline" as const),
+      label: ROOM_OPTIONS.find((r) => r.id === id)?.label ?? id,
+      icon: ROOM_OPTIONS.find((r) => r.id === id)?.icon ?? ("location-outline" as const),
       threshold: thr,
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -218,12 +312,25 @@ export function DashboardScreen() {
       className="flex-1 bg-shell px-4 pt-4"
       contentContainerStyle={{ paddingBottom: scrollBottom }}
       keyboardShouldPersistTaps="handled"
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onPullRefresh}
+          tintColor={brand.accent}
+          colors={[brand.accent]}
+        />
+      }
     >
       <ScreenHeader
         eyebrow="Monitor"
         title="Zone configuration"
         subtitle="Select a room, set its moisture threshold, and save. Each room remembers its own threshold. Use Simulate for a full leak demo."
       />
+      {lastSyncedAt ? (
+        <Text className="text-slate-500 text-[11px] mb-3 -mt-1">
+          Updated {lastSyncedAt.toLocaleString()}
+        </Text>
+      ) : null}
 
       {/* Live status — last cloud reading vs trip threshold vs valve */}
       {zone ? (
@@ -297,6 +404,110 @@ export function DashboardScreen() {
               </View>
             </Pressable>
           ) : null}
+          {roomStats ? (
+            <View className="mt-3 bg-slate-900/90 rounded-2xl px-3 py-3 border border-slate-800/90">
+              <Text className="text-slate-500 text-[10px] font-bold uppercase">
+                Last 7 days
+              </Text>
+              <Text className="text-slate-200 text-sm mt-1">
+                Leaks: {roomStats.leakCount} · Peak moisture: {roomStats.maxMoisture}% · Avg response:{" "}
+                {roomStats.avgResponseMs ?? "—"} ms
+              </Text>
+            </View>
+          ) : null}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open smart tips for this zone"
+            onPress={() => setTipsOpen(true)}
+            className="mt-4 bg-violet-950/50 rounded-2xl py-3.5 px-4 border border-violet-800/40 flex-row items-center gap-3 active:opacity-85"
+          >
+            <View className="w-10 h-10 rounded-xl bg-violet-500/15 items-center justify-center">
+              <Ionicons name="bulb-outline" size={20} color="#a78bfa" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-violet-200 font-bold text-sm">Smart tips</Text>
+              <Text className="text-violet-300/70 text-xs mt-0.5">
+                On-device suggestions from your zone data (no API key)
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#a78bfa" />
+          </Pressable>
+
+          <View className="mt-3">
+            <Text className="text-slate-500 text-[10px] font-bold uppercase tracking-wide mb-2">
+              Cloud AI · this zone
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              <Pressable
+                onPress={() => setDashAi("sensor_health")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">Sensor health</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDashAi("anomaly")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">Anomalies</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDashAi("threshold")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">Threshold idea</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDashAi("false_positive")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">False alarm?</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <ZoneTipsSheet
+            visible={tipsOpen}
+            onClose={() => setTipsOpen(false)}
+            zone={zone}
+            roomStats={roomStats}
+          />
+
+          <AiTextSheet
+            visible={dashAi !== null}
+            onClose={() => setDashAi(null)}
+            eyebrow="Cloud AI"
+            title={
+              dashAi === "sensor_health"
+                ? "Sensor health"
+                : dashAi === "anomaly"
+                  ? "Reading anomalies"
+                  : dashAi === "threshold"
+                    ? "Threshold suggestion"
+                    : "False-positive check"
+            }
+            subtitle="Uses recent sensor_readings in Supabase for this zone (ai-hub + Gemini/Groq)."
+            primaryLabel="Run analysis"
+            onGenerate={async () => {
+              if (!zone) throw new Error("No zone.");
+              const zid = zone.id;
+              if (dashAi === "sensor_health") {
+                return (await invokeAiHub("sensor_health", { zone_id: zid })).reply;
+              }
+              if (dashAi === "anomaly") {
+                return (await invokeAiHub("anomaly_narrative", { zone_id: zid })).reply;
+              }
+              if (dashAi === "threshold") {
+                return (await invokeAiHub("threshold_suggest", { zone_id: zid })).reply;
+              }
+              const payload: Record<string, unknown> = { zone_id: zid };
+              if (zone.last_moisture != null) {
+                payload.moisture = zone.last_moisture;
+              }
+              return (await invokeAiHub("false_positive", payload)).reply;
+            }}
+            footerNote="Deploy ai-hub and set a free API key (GEMINI_API_KEY, GROQ_API_KEY, or PUTER_AUTH_TOKEN) in Edge secrets."
+          />
         </View>
       ) : null}
 
@@ -322,7 +533,7 @@ export function DashboardScreen() {
         icon="location-outline"
       >
         <View className="flex-row flex-wrap gap-2">
-          {ROOMS.map((r) => {
+          {ROOM_OPTIONS.map((r) => {
             const active = selectedRoom === r.id;
             const hasSaved = roomThresholds[r.id] !== undefined;
             return (
@@ -367,10 +578,10 @@ export function DashboardScreen() {
 
       {selectedRoom ? (
         <SectionCard
-          title={ROOMS.find((r) => r.id === selectedRoom)?.label ?? selectedRoom}
+          title={ROOM_OPTIONS.find((r) => r.id === selectedRoom)?.label ?? selectedRoom}
           description="Set the moisture leak threshold for this room"
           icon={
-            ROOMS.find((r) => r.id === selectedRoom)?.icon ?? "location-outline"
+            ROOM_OPTIONS.find((r) => r.id === selectedRoom)?.icon ?? "location-outline"
           }
           contentClassName="px-4 py-5 flex flex-col gap-4"
         >
@@ -411,7 +622,7 @@ export function DashboardScreen() {
                 <Ionicons name="save-outline" size={18} color="#fff" />
                 <Text className="text-white font-bold text-base">
                   Save {Math.round(thresholdDraft)}% for{" "}
-                  {ROOMS.find((r) => r.id === selectedRoom)?.label}
+                  {ROOM_OPTIONS.find((r) => r.id === selectedRoom)?.label}
                 </Text>
               </View>
             )}
@@ -429,7 +640,9 @@ export function DashboardScreen() {
           {configuredRooms.map((room, idx) => {
             const isActive = selectedRoom === room.id;
             const isCurrentZone =
-              zone && room.threshold === zone.moisture_threshold && isActive;
+              zone &&
+              room.threshold === zone.moisture_threshold &&
+              room.label.toLowerCase() === zone.name.toLowerCase();
             return (
               <Pressable
                 key={room.id}

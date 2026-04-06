@@ -1,4 +1,5 @@
 import {
+  FunctionsFetchError,
   FunctionsHttpError,
   FunctionsRelayError,
 } from "@supabase/supabase-js";
@@ -39,9 +40,36 @@ export async function formatEdgeFunctionInvokeError(
   error: unknown,
   response?: Response | null,
 ): Promise<string> {
+  if (error instanceof FunctionsFetchError) {
+    const c = error.context;
+    const inner =
+      c instanceof Error
+        ? c.message
+        : typeof c === "object" &&
+            c !== null &&
+            "message" in c &&
+            typeof (c as { message: unknown }).message === "string"
+          ? (c as { message: string }).message
+          : c != null
+            ? String(c)
+            : "";
+    const connectivityHint =
+      /network|fetch|connect|internet|offline|dns|ssl|tls|host/i.test(
+        inner,
+      )
+        ? " Check Wi‑Fi/VPN, EXPO_PUBLIC_SUPABASE_URL (https://…supabase.co), and that this device can open HTTPS."
+        : "";
+    return inner
+      ? `${error.message}: ${inner}${connectivityHint ? ` —${connectivityHint}` : ""}`
+      : `${error.message}${connectivityHint ? `.${connectivityHint}` : ""}`;
+  }
+
   const res =
     response ??
-    (error instanceof FunctionsHttpError ? (error.context as Response) : null);
+    (error instanceof FunctionsHttpError ? (error.context as Response) : null) ??
+    (error instanceof FunctionsRelayError && error.context instanceof Response
+      ? error.context
+      : null);
 
   if (res && typeof res.clone === "function") {
     try {
@@ -65,7 +93,7 @@ export async function formatEdgeFunctionInvokeError(
               j.code === "NOT_FOUND" ||
               /function was not found|not found/i.test(parts.join(" "));
             if (notFound) {
-              return `${head}\n\nDeploy the edge function from your repo root (the folder that contains supabase/functions):\n  supabase login\n  supabase link --project-ref YOUR_PROJECT_REF\n  supabase functions deploy send-leak-alert\n\nThen set secrets: RESEND_API_KEY (and optional RESEND_FROM).`;
+              return `${head}\n\nDeploy edge functions from your repo root (the folder that contains supabase/functions):\n  supabase login\n  supabase link --project-ref YOUR_PROJECT_REF\n  supabase functions deploy send-leak-alert\n  supabase functions deploy ai-hub\n\nSecrets: RESEND_API_KEY (and optional RESEND_FROM) for leak emails; PUTER_AUTH_TOKEN for ai-hub.`;
             }
             return head;
           }
@@ -89,10 +117,16 @@ export async function formatEdgeFunctionInvokeError(
 
 /** Use in catch() after functions.invoke — surfaces JSON/text body from FunctionsHttpError. */
 export async function formatFunctionsInvokeCatch(e: unknown): Promise<string> {
+  if (e instanceof FunctionsFetchError) {
+    return formatEdgeFunctionInvokeError(e, null);
+  }
   if (e instanceof FunctionsHttpError && e.context instanceof Response) {
     return formatEdgeFunctionInvokeError(e, e.context);
   }
   if (e instanceof FunctionsRelayError) {
+    if (e.context instanceof Response) {
+      return formatEdgeFunctionInvokeError(e, e.context);
+    }
     const c = e.context;
     const extra =
       c && typeof c === "object"

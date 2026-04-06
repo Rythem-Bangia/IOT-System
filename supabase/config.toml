@@ -1,0 +1,10 @@
+# Supabase CLI reads this on `supabase functions deploy`.
+# https://supabase.com/docs/guides/functions/function-configuration
+
+# Your project ref (from Project Settings → General). Change if you use another project.
+project_id = "eabomkfkishmmxgbxpzu"
+
+[functions.ai-hub]
+# Stops the hosted API gateway from rejecting some Expo sessions with "Invalid JWT (401)".
+# Auth is still required inside the function (requireUserClient + auth.getUser).
+verify_jwt = false

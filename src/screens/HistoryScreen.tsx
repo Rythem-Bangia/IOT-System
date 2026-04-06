@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -6,15 +7,23 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
+  Share,
   Text,
   View,
 } from "react-native";
+import { AiTextSheet } from "../components/AiTextSheet";
 import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { useScrollBottomInset } from "../hooks/useScrollBottomInset";
-import { formatFunctionsInvokeCatch } from "../lib/formatError";
+import { invokeAiHub } from "../lib/aiHub";
+import {
+  formatError,
+  formatFunctionsInvokeCatch,
+} from "../lib/formatError";
+import { formatLeakHistoryForExport } from "../lib/leakHistoryExport";
+import { buildHistoryInsights } from "../lib/localInsights";
 import {
   fetchLeakHistory,
-  sendLeakEmail,
+  retrySendLeakEmail,
   type LeakEventRow,
 } from "../lib/iot";
 import { brand } from "../theme/brand";
@@ -59,6 +68,11 @@ export function HistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [historyAiOpen, setHistoryAiOpen] = useState(false);
+  const [historyCloudOpen, setHistoryCloudOpen] = useState(false);
+  const [triageOpen, setTriageOpen] = useState(false);
+  const [triageLeakId, setTriageLeakId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const data = await fetchLeakHistory(80);
@@ -82,7 +96,7 @@ export function HistoryScreen() {
     async (id: string) => {
       setRetryingId(id);
       try {
-        const r = await sendLeakEmail(id);
+        const r = await retrySendLeakEmail(id);
         await load();
         Alert.alert(
           r?.emailed ? "Email sent" : "Email not delivered",
@@ -101,6 +115,47 @@ export function HistoryScreen() {
     },
     [load],
   );
+
+  const handleShareExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      const text = formatLeakHistoryForExport(rows);
+      await Share.share(
+        { message: text, title: "Leak history" },
+        { subject: "Leak history" },
+      );
+    } catch (e) {
+      Alert.alert("Share failed", formatError(e));
+    } finally {
+      setExporting(false);
+    }
+  }, [rows]);
+
+  const handleCopyExport = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(formatLeakHistoryForExport(rows));
+      Alert.alert("Copied", "Leak history copied to the clipboard.");
+    } catch (e) {
+      Alert.alert("Copy failed", formatError(e));
+    }
+  }, [rows]);
+
+  const runHistorySummary = useCallback(async () => {
+    return buildHistoryInsights(rows, 30);
+  }, [rows]);
+
+  const runHistoryCloudSummary = useCallback(async () => {
+    const { reply } = await invokeAiHub("history_summary", { days: 30 });
+    return reply;
+  }, []);
+
+  const runLeakTriage = useCallback(async () => {
+    if (!triageLeakId) throw new Error("No leak selected.");
+    const { reply } = await invokeAiHub("leak_triage", {
+      leak_event_id: triageLeakId,
+    });
+    return reply;
+  }, [triageLeakId]);
 
   if (loading) {
     return (
@@ -131,6 +186,47 @@ export function HistoryScreen() {
               title="Leak events"
               subtitle="Each leak logs response time and email status. Retry email from a row if delivery failed."
             />
+            <View className="flex-row gap-2 mt-3">
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setHistoryAiOpen(true)}
+                className="flex-1 flex-row items-center justify-center gap-2 bg-violet-950/55 border border-violet-800/45 rounded-2xl py-3 active:opacity-85"
+              >
+                <Ionicons name="analytics-outline" size={18} color="#c4b5fd" />
+                <Text className="text-violet-200 text-sm font-bold">On-device</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setHistoryCloudOpen(true)}
+                className="flex-1 flex-row items-center justify-center gap-2 bg-violet-900/35 border border-violet-600/40 rounded-2xl py-3 active:opacity-85"
+              >
+                <Ionicons name="cloud-outline" size={18} color="#ddd6fe" />
+                <Text className="text-violet-100 text-sm font-bold">Cloud AI</Text>
+              </Pressable>
+            </View>
+            {rows.length > 0 ? (
+              <View className="flex-row gap-2 mt-2">
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={handleShareExport}
+                  disabled={exporting}
+                  className="flex-1 flex-row items-center justify-center gap-2 bg-slate-800/90 border border-slate-700/80 rounded-2xl py-3 active:opacity-85"
+                >
+                  <Ionicons name="share-outline" size={18} color={brand.accent} />
+                  <Text className="text-teal-300 text-sm font-bold">
+                    {exporting ? "…" : "Share"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={handleCopyExport}
+                  className="flex-1 flex-row items-center justify-center gap-2 bg-slate-800/90 border border-slate-700/80 rounded-2xl py-3 active:opacity-85"
+                >
+                  <Ionicons name="copy-outline" size={18} color={brand.accent} />
+                  <Text className="text-teal-300 text-sm font-bold">Copy</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         }
         ListEmptyComponent={
@@ -202,12 +298,22 @@ export function HistoryScreen() {
                   {item.email_last_error}
                 </Text>
               ) : null}
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setTriageLeakId(item.id);
+                  setTriageOpen(true);
+                }}
+                className="mt-2 bg-violet-950/40 border border-violet-800/35 rounded-2xl py-2.5 items-center active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">AI leak triage</Text>
+              </Pressable>
               {!item.email_sent_at ? (
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => retryEmail(item.id)}
                   disabled={retryingId === item.id}
-                  className="mt-3 bg-slate-800/90 border border-slate-700/80 rounded-2xl py-3 items-center active:opacity-85"
+                  className="mt-2 bg-slate-800/90 border border-slate-700/80 rounded-2xl py-3 items-center active:opacity-85"
                 >
                   <Text className="text-teal-300 text-sm font-bold">
                     {retryingId === item.id ? "Sending…" : "Retry leak email"}
@@ -217,6 +323,39 @@ export function HistoryScreen() {
             </View>
           );
         }}
+      />
+      <AiTextSheet
+        visible={historyAiOpen}
+        onClose={() => setHistoryAiOpen(false)}
+        eyebrow="History"
+        title="Leak history summary"
+        subtitle="Rolls up leak events from the last 30 days from the list below — computed on your device."
+        primaryLabel="Generate summary"
+        onGenerate={runHistorySummary}
+        footerNote="No OpenAI or other AI API. Uses only the history already loaded in this screen."
+      />
+      <AiTextSheet
+        visible={historyCloudOpen}
+        onClose={() => setHistoryCloudOpen(false)}
+        eyebrow="Cloud AI"
+        title="AI history summary"
+        subtitle="Uses your Supabase leak_events for the last 30 days (server-side with your login)."
+        primaryLabel="Generate with AI"
+        onGenerate={runHistoryCloudSummary}
+        footerNote="Requires deployed ai-hub and a free API key (GEMINI_API_KEY, GROQ_API_KEY, or PUTER_AUTH_TOKEN)."
+      />
+      <AiTextSheet
+        visible={triageOpen}
+        onClose={() => {
+          setTriageOpen(false);
+          setTriageLeakId(null);
+        }}
+        eyebrow="Cloud AI"
+        title="Leak triage checklist"
+        subtitle="Practical next steps for one selected leak — not a professional diagnosis."
+        primaryLabel="Run triage"
+        onGenerate={runLeakTriage}
+        footerNote="Deploy ai-hub and set a free API key in Edge secrets."
       />
     </View>
   );

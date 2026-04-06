@@ -14,5 +14,5 @@
       ]
     }
   },
-  "include": ["index.ts"]
+  "include": ["index.ts", "edge-globals.d.ts"]
 }

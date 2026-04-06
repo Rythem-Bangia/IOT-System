@@ -61,8 +61,10 @@ function ConfigMissing() {
         </Text>
         <Text className="text-xl font-bold text-white mb-3">Configuration</Text>
         <Text className="text-slate-400 leading-6 mb-4 text-[15px]">
-          Create a file <Text className="font-mono text-sm text-teal-300">.env</Text> in{" "}
-          <Text className="font-mono text-sm text-teal-300">water-leak-monitor</Text> with:
+          Create <Text className="font-mono text-sm text-teal-300">.env</Text> in the{" "}
+          <Text className="font-mono text-sm text-teal-300">same folder as app.json</Text>{" "}
+          (where you run <Text className="font-mono text-sm text-teal-300">expo start</Text>), then
+          restart Metro:
         </Text>
         <Text className="font-mono text-xs text-slate-200 bg-slate-950 border border-slate-800 p-4 rounded-2xl mb-5 leading-5">
           EXPO_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co{"\n"}

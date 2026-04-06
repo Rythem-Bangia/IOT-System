@@ -11,11 +11,13 @@ import {
   View,
 } from "react-native";
 import Slider from "@react-native-community/slider";
+import { AiTextSheet } from "../components/AiTextSheet";
 import { ZoneTipsSheet } from "../components/ZoneTipsSheet";
 import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { SectionCard } from "../components/ui/SectionCard";
 import { useScrollBottomInset } from "../hooks/useScrollBottomInset";
 import { useAuth } from "../context/AuthContext";
+import { invokeAiHub } from "../lib/aiHub";
 import { formatError } from "../lib/formatError";
 import {
   clearZoneLastMoisture,
@@ -87,6 +89,8 @@ export function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [tipsOpen, setTipsOpen] = useState(false);
+  type DashAiKind = "sensor_health" | "anomaly" | "threshold" | "false_positive";
+  const [dashAi, setDashAi] = useState<DashAiKind | null>(null);
 
   // Load saved room + thresholds from AsyncStorage (scoped per user)
   useEffect(() => {
@@ -430,11 +434,79 @@ export function DashboardScreen() {
             <Ionicons name="chevron-forward" size={18} color="#a78bfa" />
           </Pressable>
 
+          <View className="mt-3">
+            <Text className="text-slate-500 text-[10px] font-bold uppercase tracking-wide mb-2">
+              Cloud AI · this zone
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              <Pressable
+                onPress={() => setDashAi("sensor_health")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">Sensor health</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDashAi("anomaly")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">Anomalies</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDashAi("threshold")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">Threshold idea</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDashAi("false_positive")}
+                className="px-3 py-2.5 rounded-xl bg-slate-800/95 border border-slate-700/80 active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">False alarm?</Text>
+              </Pressable>
+            </View>
+          </View>
+
           <ZoneTipsSheet
             visible={tipsOpen}
             onClose={() => setTipsOpen(false)}
             zone={zone}
             roomStats={roomStats}
+          />
+
+          <AiTextSheet
+            visible={dashAi !== null}
+            onClose={() => setDashAi(null)}
+            eyebrow="Cloud AI"
+            title={
+              dashAi === "sensor_health"
+                ? "Sensor health"
+                : dashAi === "anomaly"
+                  ? "Reading anomalies"
+                  : dashAi === "threshold"
+                    ? "Threshold suggestion"
+                    : "False-positive check"
+            }
+            subtitle="Uses recent sensor_readings in Supabase for this zone (ai-hub + Gemini/Groq)."
+            primaryLabel="Run analysis"
+            onGenerate={async () => {
+              if (!zone) throw new Error("No zone.");
+              const zid = zone.id;
+              if (dashAi === "sensor_health") {
+                return (await invokeAiHub("sensor_health", { zone_id: zid })).reply;
+              }
+              if (dashAi === "anomaly") {
+                return (await invokeAiHub("anomaly_narrative", { zone_id: zid })).reply;
+              }
+              if (dashAi === "threshold") {
+                return (await invokeAiHub("threshold_suggest", { zone_id: zid })).reply;
+              }
+              const payload: Record<string, unknown> = { zone_id: zid };
+              if (zone.last_moisture != null) {
+                payload.moisture = zone.last_moisture;
+              }
+              return (await invokeAiHub("false_positive", payload)).reply;
+            }}
+            footerNote="Deploy ai-hub and set a free API key (GEMINI_API_KEY, GROQ_API_KEY, or PUTER_AUTH_TOKEN) in Edge secrets."
           />
         </View>
       ) : null}

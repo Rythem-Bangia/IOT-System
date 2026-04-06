@@ -1,0 +1,11 @@
+# Core (always needed)
+# No heavy dependencies — uses stdlib urllib for HTTP
+
+# On Raspberry Pi with real sensors, install the relevant driver:
+# pip install RPi.GPIO               # GPIO control (pre-installed on Pi OS)
+# pip install adafruit-circuitpython-ads1x15  # ADS1115 ADC
+# pip install spidev                  # MCP3008 ADC via SPI
+# pip install adafruit-blinka         # CircuitPython compatibility layer
+
+# For desktop testing, none of the above are needed.
+# The mock sensor driver + GPIO stubs work without any pip installs.

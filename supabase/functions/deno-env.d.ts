@@ -1,6 +1,7 @@
 /**
- * Supabase Edge Functions run on Deno. This file supplies globals for the TypeScript
- * language service in editors that are not using the Deno extension.
+ * Optional: for local editors only. Do NOT use /// <reference path="../deno-env.d.ts" />
+ * in index.ts — Supabase’s deploy bundler can fail resolving parent paths.
+ * Deno at runtime already provides `Deno` on Edge Functions.
  */
 declare namespace Deno {
   const env: {

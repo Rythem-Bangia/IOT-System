@@ -1,22 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { useAuth } from "../../context/AuthContext";
+import {
+  CUSTOM_ROOM_ID,
+  type RoomOption,
+  ROOM_OPTIONS,
+  roomOptionById,
+  roomOptionByLabel,
+} from "../../data/rooms";
+import { getSelectedRoom, setSelectedRoom } from "../../lib/iot";
 import { brand } from "../../theme/brand";
-
-const ROOMS: { id: string; label: string; icon: React.ComponentProps<typeof Ionicons>["name"] }[] = [
-  { id: "kitchen", label: "Kitchen", icon: "restaurant-outline" },
-  { id: "bathroom", label: "Bathroom", icon: "water-outline" },
-  { id: "basement", label: "Basement", icon: "arrow-down-outline" },
-  { id: "laundry", label: "Laundry", icon: "shirt-outline" },
-  { id: "garage", label: "Garage", icon: "car-outline" },
-  { id: "custom", label: "Custom", icon: "create-outline" },
-];
-
-function storageKey(uid: string | undefined) {
-  return uid ? `lab_room_location_${uid}` : "lab_room_location";
-}
 
 type Props = {
   onLocationChange: (location: string) => void;
@@ -29,14 +23,15 @@ export function RoomPicker({ onLocationChange }: Props) {
   const [showCustom, setShowCustom] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(storageKey(user?.id)).then((val) => {
+    if (!user?.id) return;
+    getSelectedRoom(user.id).then((val) => {
       if (!val) return;
-      const room = ROOMS.find((r) => r.label === val);
-      if (room) {
-        setSelected(room.id);
+      const byLabel = roomOptionByLabel(val);
+      if (byLabel) {
+        setSelected(byLabel.id);
         onLocationChange(val);
       } else {
-        setSelected("custom");
+        setSelected(CUSTOM_ROOM_ID);
         setCustomText(val);
         setShowCustom(true);
         onLocationChange(val);
@@ -47,14 +42,14 @@ export function RoomPicker({ onLocationChange }: Props) {
   const pick = useCallback(
     (roomId: string) => {
       setSelected(roomId);
-      if (roomId === "custom") {
+      if (roomId === CUSTOM_ROOM_ID) {
         setShowCustom(true);
         return;
       }
       setShowCustom(false);
-      const room = ROOMS.find((r) => r.id === roomId);
+      const room = roomOptionById(roomId);
       const label = room?.label ?? roomId;
-      AsyncStorage.setItem(storageKey(user?.id), label);
+      if (user?.id) void setSelectedRoom(user.id, label);
       onLocationChange(label);
     },
     [onLocationChange, user?.id],
@@ -63,9 +58,16 @@ export function RoomPicker({ onLocationChange }: Props) {
   const saveCustom = useCallback(() => {
     const val = customText.trim();
     if (!val) return;
-    AsyncStorage.setItem(storageKey(user?.id), val);
+    if (user?.id) void setSelectedRoom(user.id, val);
     onLocationChange(val);
   }, [customText, onLocationChange, user?.id]);
+
+  const customRow: RoomOption = {
+    id: CUSTOM_ROOM_ID,
+    label: "Custom",
+    icon: "create-outline",
+  };
+  const pickerRows: RoomOption[] = [...ROOM_OPTIONS, customRow];
 
   return (
     <View className="rounded-[22px] border border-slate-800/90 bg-slate-900/80 overflow-hidden mb-5">
@@ -85,7 +87,7 @@ export function RoomPicker({ onLocationChange }: Props) {
 
       <View className="px-4 py-4">
         <View className="flex-row flex-wrap gap-2 mb-3">
-          {ROOMS.map((r) => {
+          {pickerRows.map((r) => {
             const active = selected === r.id;
             return (
               <Pressable
@@ -133,14 +135,14 @@ export function RoomPicker({ onLocationChange }: Props) {
           </View>
         ) : null}
 
-        {selected && selected !== "custom" ? (
+        {selected && selected !== CUSTOM_ROOM_ID ? (
           <View className="flex-row items-center gap-2 bg-emerald-950/40 rounded-xl px-3 py-2.5 mt-2 border border-emerald-800/35">
             <Ionicons name="checkmark-circle" size={16} color="#6ee7b7" />
             <Text className="text-emerald-300 text-sm font-medium">
-              Monitoring: {ROOMS.find((r) => r.id === selected)?.label}
+              Monitoring: {roomOptionById(selected)?.label}
             </Text>
           </View>
-        ) : selected === "custom" && customText.trim() ? (
+        ) : selected === CUSTOM_ROOM_ID && customText.trim() ? (
           <View className="flex-row items-center gap-2 bg-emerald-950/40 rounded-xl px-3 py-2.5 mt-2 border border-emerald-800/35">
             <Ionicons name="checkmark-circle" size={16} color="#6ee7b7" />
             <Text className="text-emerald-300 text-sm font-medium">

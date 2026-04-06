@@ -27,6 +27,14 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
-    }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow photo access to run optional AI checks on leak-area images."
+        }
+      ]
+    ]
   }
 }

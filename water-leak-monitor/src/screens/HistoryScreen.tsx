@@ -14,6 +14,7 @@ import {
 import { AiTextSheet } from "../components/AiTextSheet";
 import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { useScrollBottomInset } from "../hooks/useScrollBottomInset";
+import { invokeAiHub } from "../lib/aiHub";
 import {
   formatError,
   formatFunctionsInvokeCatch,
@@ -69,6 +70,9 @@ export function HistoryScreen() {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [historyAiOpen, setHistoryAiOpen] = useState(false);
+  const [historyCloudOpen, setHistoryCloudOpen] = useState(false);
+  const [triageOpen, setTriageOpen] = useState(false);
+  const [triageLeakId, setTriageLeakId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const data = await fetchLeakHistory(80);
@@ -140,6 +144,19 @@ export function HistoryScreen() {
     return buildHistoryInsights(rows, 30);
   }, [rows]);
 
+  const runHistoryCloudSummary = useCallback(async () => {
+    const { reply } = await invokeAiHub("history_summary", { days: 30 });
+    return reply;
+  }, []);
+
+  const runLeakTriage = useCallback(async () => {
+    if (!triageLeakId) throw new Error("No leak selected.");
+    const { reply } = await invokeAiHub("leak_triage", {
+      leak_event_id: triageLeakId,
+    });
+    return reply;
+  }, [triageLeakId]);
+
   if (loading) {
     return (
       <View className="flex-1 bg-shell items-center justify-center">
@@ -176,7 +193,15 @@ export function HistoryScreen() {
                 className="flex-1 flex-row items-center justify-center gap-2 bg-violet-950/55 border border-violet-800/45 rounded-2xl py-3 active:opacity-85"
               >
                 <Ionicons name="analytics-outline" size={18} color="#c4b5fd" />
-                <Text className="text-violet-200 text-sm font-bold">Insights</Text>
+                <Text className="text-violet-200 text-sm font-bold">On-device</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setHistoryCloudOpen(true)}
+                className="flex-1 flex-row items-center justify-center gap-2 bg-violet-900/35 border border-violet-600/40 rounded-2xl py-3 active:opacity-85"
+              >
+                <Ionicons name="cloud-outline" size={18} color="#ddd6fe" />
+                <Text className="text-violet-100 text-sm font-bold">Cloud AI</Text>
               </Pressable>
             </View>
             {rows.length > 0 ? (
@@ -273,12 +298,22 @@ export function HistoryScreen() {
                   {item.email_last_error}
                 </Text>
               ) : null}
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setTriageLeakId(item.id);
+                  setTriageOpen(true);
+                }}
+                className="mt-2 bg-violet-950/40 border border-violet-800/35 rounded-2xl py-2.5 items-center active:opacity-85"
+              >
+                <Text className="text-violet-200 text-xs font-bold">AI leak triage</Text>
+              </Pressable>
               {!item.email_sent_at ? (
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => retryEmail(item.id)}
                   disabled={retryingId === item.id}
-                  className="mt-3 bg-slate-800/90 border border-slate-700/80 rounded-2xl py-3 items-center active:opacity-85"
+                  className="mt-2 bg-slate-800/90 border border-slate-700/80 rounded-2xl py-3 items-center active:opacity-85"
                 >
                   <Text className="text-teal-300 text-sm font-bold">
                     {retryingId === item.id ? "Sending…" : "Retry leak email"}
@@ -298,6 +333,29 @@ export function HistoryScreen() {
         primaryLabel="Generate summary"
         onGenerate={runHistorySummary}
         footerNote="No OpenAI or other AI API. Uses only the history already loaded in this screen."
+      />
+      <AiTextSheet
+        visible={historyCloudOpen}
+        onClose={() => setHistoryCloudOpen(false)}
+        eyebrow="Cloud AI"
+        title="AI history summary"
+        subtitle="Uses your Supabase leak_events for the last 30 days (server-side with your login)."
+        primaryLabel="Generate with AI"
+        onGenerate={runHistoryCloudSummary}
+        footerNote="Requires deployed ai-hub and a free API key (GEMINI_API_KEY, GROQ_API_KEY, or PUTER_AUTH_TOKEN)."
+      />
+      <AiTextSheet
+        visible={triageOpen}
+        onClose={() => {
+          setTriageOpen(false);
+          setTriageLeakId(null);
+        }}
+        eyebrow="Cloud AI"
+        title="Leak triage checklist"
+        subtitle="Practical next steps for one selected leak — not a professional diagnosis."
+        primaryLabel="Run triage"
+        onGenerate={runLeakTriage}
+        footerNote="Deploy ai-hub and set a free API key in Edge secrets."
       />
     </View>
   );
