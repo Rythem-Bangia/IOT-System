@@ -41,6 +41,10 @@ yarn-error.*
 Thumbs.db
 *.pem
 
+# Editor
+.cursor/
+.vscode/
+
 # typescript
 *.tsbuildinfo
 
