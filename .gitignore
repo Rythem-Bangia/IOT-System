@@ -1,4 +1,5 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# IOT System — ignore local secrets, dependencies, and generated files.
+# Keep this list updated when tooling or paths change.
 
 # Secrets — never commit
 .env
@@ -31,7 +32,7 @@ expo-env.d.ts
 .metro-health-check*
 **/.metro-health-check*
 
-# debug
+# Debug logs
 npm-debug.*
 yarn-debug.*
 yarn-error.*
@@ -41,14 +42,14 @@ yarn-error.*
 Thumbs.db
 *.pem
 
-# Editor
+# Editor / IDE (local only)
 .cursor/
 .vscode/
 
-# typescript
+# TypeScript
 *.tsbuildinfo
 
-# generated native folders
+# Generated native folders
 /ios
 /android
 
