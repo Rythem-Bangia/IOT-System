@@ -30,8 +30,8 @@ type Props = {
   onRequestAiCompare?: () => void;
 };
 
-/** Pi sends a heartbeat each poll (default 5s); allow extra slack for slow networks */
-const STALE_SECONDS = 120;
+/** Pi sends a heartbeat each poll (default 5s); allow ~6 missed cycles before flagging stale */
+const STALE_SECONDS = 30;
 
 export function RaspberryPiStatus({
   zoneId,
@@ -50,6 +50,7 @@ export function RaspberryPiStatus({
     | null
   >(null);
   const [disconnectBusy, setDisconnectBusy] = useState(false);
+  const [disconnectedAt, setDisconnectedAt] = useState<number | null>(null);
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const pulseLoop = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -60,9 +61,11 @@ export function RaspberryPiStatus({
         p_zone_id: zoneId,
       });
       if (error) throw error;
+      setDisconnectedAt(Date.now());
+      setReadings([]);
       Alert.alert(
         "Pi disconnected",
-        "The Raspberry Pi will go OFFLINE within a few seconds. Run python3 main.py and pair again to reconnect.",
+        "The Raspberry Pi was kicked offline. Run python3 main.py and pair the new code that prints to reconnect.",
       );
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Disconnect failed";
@@ -117,13 +120,24 @@ export function RaspberryPiStatus({
         .eq("source", "physical")
         .order("recorded_at", { ascending: false })
         .limit(20);
-      if (!error && data) setReadings(data as PhysicalReading[]);
+      if (!error && data) {
+        const fresh =
+          disconnectedAt !== null
+            ? (data as PhysicalReading[]).filter(
+                (r) => new Date(r.recorded_at).getTime() > disconnectedAt,
+              )
+            : (data as PhysicalReading[]);
+        setReadings(fresh);
+        if (disconnectedAt !== null && fresh.length > 0) {
+          setDisconnectedAt(null);
+        }
+      }
     } catch {
       /* swallow */
     } finally {
       setLoading(false);
     }
-  }, [zoneId]);
+  }, [zoneId, disconnectedAt]);
 
   useEffect(() => {
     fetchReadings();
