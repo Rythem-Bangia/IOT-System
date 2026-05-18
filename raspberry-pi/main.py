@@ -34,7 +34,7 @@ import pairing
 from actuators import Buzzer, StatusLED, Valve, cleanup as gpio_cleanup
 from local_ai import LocalAI
 from sensor import create_sensor
-from supabase_client import SupabaseEdge
+from supabase_client import DeviceSecretRevokedError, SupabaseEdge
 
 
 # ─── Globals ─────────────────────────────────────────────────────────
@@ -250,6 +250,8 @@ def main():
                         elif config.ENABLE_CLOUD_AI and leak_event_id and not cloud.has_user_session():
                             print("  Cloud AI skipped (sign in with email/password for ai-hub)")
 
+                    except DeviceSecretRevokedError:
+                        raise
                     except Exception as e:
                         print(f"  Cloud submit failed: {e}")
 
@@ -272,6 +274,8 @@ def main():
                             if new_thr != threshold:
                                 print(f"  Threshold updated: {threshold}% -> {new_thr}%")
                                 threshold = int(new_thr)
+                    except DeviceSecretRevokedError:
+                        raise
                     except Exception as e:
                         print(f"  Cloud sync: {e}")
 
@@ -281,6 +285,27 @@ def main():
 
         except KeyboardInterrupt:
             break
+        except DeviceSecretRevokedError:
+            print("\n" + "=" * 60)
+            print("[main] App pressed 'Disconnect Pi' — secret was rotated.")
+            print("[main] Clearing local pairing and waiting for a new code…")
+            print("=" * 60 + "\n")
+            pairing.clear()
+            valve.open()
+            led.off()
+            buzzer.stop()
+            paired = pairing.pair_interactive(cloud)
+            if paired:
+                config.ZONE_ID = paired["zone_id"]
+                config.DEVICE_SECRET = paired["device_secret"]
+                zone_id = paired["zone_id"]
+                device_secrets = [paired["device_secret"]]
+                cloud_sync = True
+                print(f"[main] Re-paired! zone={zone_id[:8]}… continuing…\n")
+            else:
+                print("[main] Pairing aborted — running OFFLINE.")
+                cloud_sync = False
+                zone_id = None
         except Exception as e:
             print(f"[main] Error in cycle {cycle}: {e}")
             traceback.print_exc()

@@ -10,13 +10,12 @@ import { HistoryScreen } from "./src/screens/HistoryScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { SimulateScreen } from "./src/screens/SimulateScreen";
-import { TinkercadConnectScreen } from "./src/screens/TinkercadConnectScreen";
 import { LiveLinkScreen } from "./src/screens/LiveLinkScreen";
 import { EmailVerificationBanner } from "./src/components/EmailVerificationBanner";
 import { supabaseConfigured } from "./src/lib/supabase";
 import { brand } from "./src/theme/brand";
 
-type Tab = "monitor" | "simulate" | "circuits" | "live" | "history" | "settings";
+type Tab = "monitor" | "simulate" | "live" | "history" | "settings";
 
 const TABS: {
   id: Tab;
@@ -30,12 +29,6 @@ const TABS: {
     label: "Simulate",
     icon: "play-circle-outline",
     iconActive: "play-circle",
-  },
-  {
-    id: "circuits",
-    label: "Circuits",
-    icon: "hardware-chip-outline",
-    iconActive: "hardware-chip",
   },
   {
     id: "live",
@@ -120,7 +113,6 @@ function MainTabs() {
 
       {tab === "monitor" ? <DashboardScreen /> : null}
       {tab === "simulate" ? <SimulateScreen /> : null}
-      {tab === "circuits" ? <TinkercadConnectScreen /> : null}
       {tab === "live" ? <LiveLinkScreen /> : null}
       {tab === "history" ? <HistoryScreen /> : null}
       {tab === "settings" ? <SettingsScreen /> : null}

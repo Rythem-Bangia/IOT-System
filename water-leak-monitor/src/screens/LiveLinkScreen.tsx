@@ -287,8 +287,8 @@ export function LiveLinkScreen() {
     >
       <ScreenHeader
         eyebrow="Live Link"
-        title="Tinkercad bridge"
-        subtitle="Set moisture from Tinkercad Serial Monitor here — it goes straight to the cloud. No external server needed."
+        title="Manual moisture entry"
+        subtitle="Type a moisture reading and push it straight to the cloud — useful for live demos or smoke-testing the leak pipeline."
       />
 
       {/* ── Live status ── */}
@@ -368,7 +368,7 @@ export function LiveLinkScreen() {
             </Pressable>
           </View>
           <Text className="text-slate-500 text-[10px] mt-2 text-center">
-            In Tinkercad: press the pushbutton on D5 to reset there too
+            Reset reopens the cloud-side valve. Any paired device will pick this up on its next poll.
           </Text>
         </View>
       ) : null}
@@ -438,7 +438,7 @@ export function LiveLinkScreen() {
       {/* ── Moisture control panel ── */}
       <SectionCard
         title="Set moisture"
-        description="Mirror the % from Tinkercad Serial Monitor, or drag the slider"
+        description="Drag the slider, or type a value to push to the cloud"
         icon="water-outline"
       >
         <View className="items-center mb-2">
@@ -643,8 +643,8 @@ export function LiveLinkScreen() {
           <Ionicons name="bulb-outline" size={18} color={brand.accent} />
         </View>
         <Text className="text-teal-100/85 text-[13px] flex-1 leading-[20px]">
-          Open Tinkercad, run your simulation, read the moisture % from Serial Monitor, type it above
-          and tap Send. The app handles the rest - cloud logic, valve control, and leak alerts.
+          Type a moisture % above and tap Send. The cloud handles the rest — threshold check,
+          valve control, leak event, and email alert. Use this for quick demos without any device.
         </Text>
       </View>
     </ScrollView>

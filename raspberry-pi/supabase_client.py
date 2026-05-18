@@ -16,6 +16,11 @@ from typing import Any
 import config
 
 
+class DeviceSecretRevokedError(RuntimeError):
+    """Raised when the cloud rejects our device_secret (the user pressed
+    Disconnect Pi in the app, which rotated the zone's device_secret)."""
+
+
 class SupabaseEdge:
     """
     Lightweight Supabase client using only urllib (no heavy SDK).
@@ -159,6 +164,8 @@ class SupabaseEdge:
                 return out if isinstance(out, dict) else {}
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode() if e.fp else str(e)
+                if "Invalid device secret" in error_body:
+                    raise DeviceSecretRevokedError(error_body)
                 raise RuntimeError(
                     f"RPC submit_sensor_reading_device failed ({e.code}): {error_body}",
                 )

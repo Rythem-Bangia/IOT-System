@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   KeyboardAvoidingView,
@@ -48,8 +49,39 @@ export function RaspberryPiStatus({
     | { kind: "err"; message: string }
     | null
   >(null);
+  const [disconnectBusy, setDisconnectBusy] = useState(false);
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const pulseLoop = useRef<Animated.CompositeAnimation | null>(null);
+
+  const performDisconnect = useCallback(async () => {
+    setDisconnectBusy(true);
+    try {
+      const { error } = await supabase.rpc("unlink_pi_device", {
+        p_zone_id: zoneId,
+      });
+      if (error) throw error;
+      Alert.alert(
+        "Pi disconnected",
+        "The Raspberry Pi will go OFFLINE within a few seconds. Run python3 main.py and pair again to reconnect.",
+      );
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Disconnect failed";
+      Alert.alert("Disconnect failed", message);
+    } finally {
+      setDisconnectBusy(false);
+    }
+  }, [zoneId]);
+
+  const askDisconnect = useCallback(() => {
+    Alert.alert(
+      "Disconnect Raspberry Pi?",
+      "This rotates the device secret, so the Pi will be kicked offline immediately. You can pair it again any time with a new code.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Disconnect", style: "destructive", onPress: performDisconnect },
+      ],
+    );
+  }, [performDisconnect]);
 
   const submitPairing = useCallback(async () => {
     const cleaned = pairCode.replace(/\D/g, "");
@@ -434,7 +466,7 @@ export function RaspberryPiStatus({
             </View>
           )}
 
-          {/* Pair button — always visible while Pi is offline */}
+          {/* Pair / Disconnect toggle — depends on current status */}
           {status === "offline" ? (
             <Pressable
               accessibilityRole="button"
@@ -452,7 +484,26 @@ export function RaspberryPiStatus({
                 </Text>
               </View>
             </Pressable>
-          ) : null}
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              disabled={disconnectBusy}
+              onPress={askDisconnect}
+              className="bg-rose-700/80 rounded-2xl py-3 items-center border border-rose-400/25 active:opacity-85 mb-2"
+              style={{ opacity: disconnectBusy ? 0.6 : 1 }}
+            >
+              <View className="flex-row items-center gap-2">
+                {disconnectBusy ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons name="unlink" size={16} color="#fff" />
+                )}
+                <Text className="text-white font-bold text-sm">
+                  {disconnectBusy ? "Disconnecting…" : "Disconnect Raspberry Pi"}
+                </Text>
+              </View>
+            </Pressable>
+          )}
 
           {/* AI compare button */}
           {readings.length > 0 && onRequestAiCompare ? (
